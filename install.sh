@@ -1,85 +1,149 @@
-#!/bin/bash
-set -euo pipefail # Exit on error, unset var, or pipe failure
+#!/usr/bin/env bash
+set -euo pipefail
 
-# --- Configuration ---
-# Directory where the kernel source will be cloned
+# --- Defaults ---
 KERNEL_SRC_DIR="linux"
-# Number of parallel jobs for make. Defaults to number of CPU cores.
-# Override with: export MAKE_JOBS=4; ./build.sh
-: "${MAKE_JOBS:=$(nproc)}"
-# ---
+BRANCH_OR_TAG="master"       # torvalds/linux の既定
+MAKE_JOBS="${MAKE_JOBS:-$(nproc)}"
+DO_INSTALL=1                 # 0 で build のみ
+UPDATE_GRUB=0                # Fedora+BLSは通常不要。必要なら -g
+USE_LOCALMODCONFIG=0         # 有効なら -L
+LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
 
-# Check if running as root
-if [ "$(id -u)" -eq 0 ]; then
-   echo "This script should not be run as root. Use sudo when needed." >&2
-   exit 1
+# --- Helpers ---
+usage() {
+  cat <<EOF
+Usage: $0 [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L]
+  -j N   : make -jN（既定: $(nproc) or \$MAKE_JOBS)
+  -d DIR : カーネルソースディレクトリ（既定: linux）
+  -b REF : チェックアウトするブランチ/タグ（既定: master）
+  -n     : インストールを行わない（buildのみ）
+  -g     : GRUB設定を更新する（通常Fedoraでは不要）
+  -L     : make localmodconfig を使う（稼働中モジュールに最適化）
+EOF
+}
+
+msg()  { printf "\n--> %s\n" "$*"; }
+die()  { echo "ERROR: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
+
+cleanup() {
+  local ec=$?
+  if (( ec != 0 )); then
+    echo
+    echo "❌ Failed with exit code $ec. See log: $LOGFILE" >&2
+  fi
+}
+trap cleanup EXIT
+
+# --- Parse options ---
+while getopts ":j:d:b:ngLh" opt; do
+  case "$opt" in
+    j) MAKE_JOBS="$OPTARG" ;;
+    d) KERNEL_SRC_DIR="$OPTARG" ;;
+    b) BRANCH_OR_TAG="$OPTARG" ;;
+    n) DO_INSTALL=0 ;;
+    g) UPDATE_GRUB=1 ;;
+    L) USE_LOCALMODCONFIG=1 ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 2 ;;
+  esac
+done
+
+# --- Sanity checks ---
+if [[ "$(id -u)" -eq 0 ]]; then
+  die "Do NOT run as root. Use sudo only when prompted."
 fi
 
-LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
-# Redirect stdout and stderr to both console and log file
+need git; need make; need tee
+
+# Log both to console and file
 exec > >(tee -a "$LOGFILE") 2>&1
 
 START_TIME=$(date +%s)
-
 echo "===== Kernel Build Started: $(date) ====="
-echo "Using ${MAKE_JOBS} parallel jobs for make."
+echo "Dir=${KERNEL_SRC_DIR}  Ref=${BRANCH_OR_TAG}  -j${MAKE_JOBS}"
+echo "Install=${DO_INSTALL}  UpdateGRUB=${UPDATE_GRUB}  localmodconfig=${USE_LOCALMODCONFIG}"
 
-echo
-echo "--> Step 1: Installing build dependencies..."
-# Install kernel build dependencies
-sudo dnf builddep -y kernel
-
-echo
-echo "--> Step 2: Cloning/Updating Linux kernel source..."
-# Clone kernel source from the canonical repository
-if [ ! -d "$KERNEL_SRC_DIR" ]; then
-  # Using the canonical kernel.org git repository
-  git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git "$KERNEL_SRC_DIR"
+# --- Step 1: Dependencies (Fedora only) ---
+msg "Checking/Installing build dependencies (Fedora only)"
+if [[ -f /etc/fedora-release ]]; then
+  need dnf
+  sudo dnf -y builddep kernel
 else
-  echo "'$KERNEL_SRC_DIR' directory already exists. Fetching latest changes..."
-  (cd "$KERNEL_SRC_DIR" && git pull)
+  echo "Note: Non-Fedora detected. Ensure kernel build deps are installed (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, etc.)."
 fi
+
+# --- Step 2: Clone or update source ---
+msg "Cloning/Updating Linux source"
+if [[ ! -d "$KERNEL_SRC_DIR/.git" ]]; then
+  git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git "$KERNEL_SRC_DIR"
+fi
+
 cd "$KERNEL_SRC_DIR"
+git fetch --tags origin
+# BRANCH_OR_TAG がタグかブランチか気にせず checkout
+git checkout -f "$BRANCH_OR_TAG" || die "Cannot checkout $BRANCH_OR_TAG"
+# ブランチの場合は最新へ
+if git rev-parse --abbrev-ref HEAD >/dev/null 2>&1 && [[ "$(git rev-parse --abbrev-ref HEAD)" != "HEAD" ]]; then
+  git pull --ff-only || die "git pull failed (non-ff?)"
+fi
 
-echo
-echo "--> Step 3: Configuring the kernel..."
-# Copy the current kernel configuration
-echo "Copying config from running kernel: /boot/config-$(uname -r)"
-cp "/boot/config-$(uname -r)" .config
+# --- Step 3: Configure ---
+msg "Configuring the kernel"
+if [[ -f "/boot/config-$(uname -r)" ]]; then
+  echo "Copying running kernel config"
+  cp "/boot/config-$(uname -r)" .config
+else
+  echo "No running config found; using defconfig"
+  make defconfig
+fi
 
-# Update the configuration with default values for new options
-echo "Updating .config with 'make olddefconfig'..."
-make olddefconfig
+if (( USE_LOCALMODCONFIG )); then
+  echo "Optimizing with localmodconfig"
+  yes "" | make localmodconfig
+else
+  echo "Updating .config with olddefconfig"
+  make olddefconfig
+fi
 
-echo
-echo "--> Step 4: Building the kernel (this will take a while)..."
-# Build the kernel using a configurable number of parallel jobs
+# --- Step 4: Build ---
+msg "Building the kernel (this may take a while)"
 make -j"${MAKE_JOBS}"
 
-echo
-echo "--> Step 5: Installing kernel and modules..."
-echo "Installing kernel modules..."
-sudo make modules_install
+# --- Step 5: Install (optional) ---
+if (( DO_INSTALL )); then
+  msg "Installing modules"
+  sudo make modules_install
 
-# Install the kernel itself
-echo "Installing kernel..."
-sudo make install
-# Note: On modern Fedora, 'make install' automatically runs kernel-install,
-# which creates bootloader entries. The explicit grub2-mkconfig below is
-# often redundant but acts as a safeguard.
+  msg "Installing kernel (calls kernel-install on Fedora)"
+  sudo make install
+else
+  msg "Skipping install (-n specified)"
+fi
 
-echo
-echo "--> Step 6: Updating GRUB configuration..."
-# On some Fedora systems, /boot/grub2/grub.cfg is used for both BIOS and UEFI.
-# The file at /boot/efi/EFI/fedora/grub.cfg can be a wrapper that should not be overwritten.
-sudo grub2-mkconfig -o /boot/grub2/grub.cfg
-
-echo
-echo "✅ Kernel build and installation complete."
-echo "Please reboot your system to use the new kernel."
+# --- Step 6: GRUB update (optional) ---
+if (( DO_INSTALL && UPDATE_GRUB )); then
+  msg "Updating GRUB config"
+  if [[ -f /etc/fedora-release ]]; then
+    # FedoraはBLS有効が既定。通常は不要だが、明示要求時のみ実施。
+    sudo grub2-mkconfig -o /boot/grub2/grub.cfg || true
+  else
+    # 環境に合わせて調整が必要
+    if [[ -d /boot/grub ]]; then
+      sudo grub-mkconfig -o /boot/grub/grub.cfg
+    elif [[ -d /boot/grub2 ]]; then
+      sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+    else
+      echo "GRUB directory not found; skip."
+    fi
+  fi
+else
+  msg "Skipping GRUB update"
+fi
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 echo
-echo "Total elapsed time: ${ELAPSED} seconds ($((${ELAPSED}/60)) minutes)."
+echo "✅ Done. Total elapsed: ${ELAPSED}s (~$((ELAPSED/60)) min). Log: $LOGFILE"
 echo "===== Kernel Build Finished: $(date) ====="
