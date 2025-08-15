@@ -11,7 +11,13 @@ LOGFILE="uninstall_$(date +%Y%m%d_%H%M%S).log"
 msg(){ printf "\n--> %s\n" "$*"; }
 die(){ echo "ERROR: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
-run(){ if (( DRY_RUN )); then echo "[dry-run] $*"; else eval "$@"; fi; }
+run() {
+  if (( DRY_RUN )); then
+    printf '[dry-run]'; printf ' %q' "$@"; printf '\n'
+  else
+    "$@"
+  fi
+}
 
 usage(){
   cat <<EOF
@@ -57,7 +63,9 @@ exec > >(tee -a "$LOGFILE") 2>&1
 
 RUNNING="$(uname -r)"
 ALL_VERSIONS=()
-while IFS= read -r v; do ALL_VERSIONS+=("$v"); done < <(ls -1d /lib/modules/* 2>/dev/null | xargs -n1 basename | sort -V)
+	mapfile -t ALL_VERSIONS < <(
+	find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V
+)
 
 (( ${#ALL_VERSIONS[@]} )) || die "/lib/modules にカーネルが見つかりません。"
 

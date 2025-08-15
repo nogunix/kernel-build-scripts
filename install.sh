@@ -122,8 +122,11 @@ if (( DO_INSTALL )); then
   RECORD_DIR="/var/lib/kernel-build-scripts"
   RECORD_FILE="$RECORD_DIR/last-installed"
 
-  # インストールされたバージョンを取得（モジュールディレクトリの最も新しいもの）
-  INSTALLED_VERSION=$(ls -1dt /lib/modules/* | head -n1 | xargs -n1 basename)
+  # /lib/modules 配下で最終更新が新しいものを1つ取得
+INSTALLED_VERSION="$(
+  find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' \
+  | sort -nr | awk 'NR==1{print $2}'
+)"
 
   echo "Recording installed kernel version: $INSTALLED_VERSION"
   sudo mkdir -p "$RECORD_DIR"
