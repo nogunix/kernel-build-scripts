@@ -1,0 +1,15 @@
+# Logs
+*.log
+
+# Editor/OS
+.DS_Store
+*.swp
+*.swo
+
+# Kernel build artifacts (if any end up here)
+*.o
+*.ko
+*.mod
+*.mod.*
+modules.order
+Module.symvers
