@@ -118,6 +118,16 @@ if (( DO_INSTALL )); then
 
   msg "Installing kernel (calls kernel-install on Fedora)"
   sudo make install
+  # 記録ディレクトリ
+  RECORD_DIR="/var/lib/kernel-build-scripts"
+  RECORD_FILE="$RECORD_DIR/last-installed"
+
+  # インストールされたバージョンを取得（モジュールディレクトリの最も新しいもの）
+  INSTALLED_VERSION=$(ls -1dt /lib/modules/* | head -n1 | xargs -n1 basename)
+
+  echo "Recording installed kernel version: $INSTALLED_VERSION"
+  sudo mkdir -p "$RECORD_DIR"
+  echo "$INSTALLED_VERSION" | sudo tee "$RECORD_FILE" >/dev/null
 else
   msg "Skipping install (-n specified)"
 fi
