@@ -51,7 +51,10 @@ done
 
 # --- Sanity checks ---
 if [[ "$(id -u)" -eq 0 ]]; then
-  die "Do NOT run as root. sudo は内部で必要に応じて使います。"
+  SUDO=""
+else
+  SUDO="sudo"
+  need sudo
 fi
 
 need find
@@ -139,21 +142,21 @@ fi
 if (( IS_BLS )) && command -v kernel-install >/dev/null 2>&1; then
   msg "BLS 環境を検出: kernel-install でエントリを削除します"
   # kernel-install は root 必須
-  run sudo kernel-install remove "$TARGET_VERSION"
+  run ${SUDO} kernel-install remove "$TARGET_VERSION"
 else
   msg "非BLS/手動モード: 直接ファイルを削除します"
-  run sudo rm -f "$KERNEL_IMG" "$INITRAMFS_IMG" "$CONFIG_FILE" "$SYSTEMMAP_FILE"
+  run ${SUDO} rm -f "$KERNEL_IMG" "$INITRAMFS_IMG" "$CONFIG_FILE" "$SYSTEMMAP_FILE"
   if (( ${#LOADER_ENTRIES[@]} )); then
-    run sudo rm -f "${LOADER_ENTRIES[@]}"
+    run ${SUDO} rm -f "${LOADER_ENTRIES[@]}"
   fi
 
   # GRUB再生成（自動検出）
   if command -v grub2-mkconfig >/dev/null 2>&1 && [[ -d /boot/grub2 ]]; then
     msg "Updating GRUB (grub2-mkconfig)"
-    run sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+    run ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg
   elif command -v grub-mkconfig >/dev/null 2>&1 && [[ -d /boot/grub ]]; then
     msg "Updating GRUB (grub-mkconfig)"
-    run sudo grub-mkconfig -o /boot/grub/grub.cfg
+    run ${SUDO} grub-mkconfig -o /boot/grub/grub.cfg
   else
     echo "Note: GRUBの自動更新は実行されませんでした。必要なら手動で更新してください。"
   fi
@@ -161,7 +164,7 @@ fi
 
 # モジュールを最後に削除（依存ファイルが残っても参照されないように順序を考慮）
 msg "Deleting modules directory: $MODULES_DIR"
-run sudo rm -rf "$MODULES_DIR"
+run ${SUDO} rm -rf "$MODULES_DIR"
 
 echo
 echo "✅ カーネル $TARGET_VERSION のアンインストールが完了しました。"
