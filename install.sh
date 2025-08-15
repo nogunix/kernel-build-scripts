@@ -52,7 +52,10 @@ done
 
 # --- Sanity checks ---
 if [[ "$(id -u)" -eq 0 ]]; then
-  die "Do NOT run as root. Use sudo only when prompted."
+  SUDO=""
+else
+  SUDO="sudo"
+  need sudo
 fi
 
 need git; need make; need tee
@@ -69,7 +72,7 @@ echo "Install=${DO_INSTALL}  UpdateGRUB=${UPDATE_GRUB}  localmodconfig=${USE_LOC
 msg "Checking/Installing build dependencies (Fedora only)"
 if [[ -f /etc/fedora-release ]]; then
   need dnf
-  sudo dnf -y builddep kernel
+  ${SUDO} dnf -y builddep kernel
 else
   echo "Note: Non-Fedora detected. Ensure kernel build deps are installed (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, etc.)."
 fi
@@ -114,10 +117,10 @@ make -j"${MAKE_JOBS}"
 # --- Step 5: Install (optional) ---
 if (( DO_INSTALL )); then
   msg "Installing modules"
-  sudo make modules_install
+  ${SUDO} make modules_install
 
   msg "Installing kernel (calls kernel-install on Fedora)"
-  sudo make install
+  ${SUDO} make install
   # 記録ディレクトリ
   RECORD_DIR="/var/lib/kernel-build-scripts"
   RECORD_FILE="$RECORD_DIR/last-installed"
@@ -129,8 +132,8 @@ INSTALLED_VERSION="$(
 )"
 
   echo "Recording installed kernel version: $INSTALLED_VERSION"
-  sudo mkdir -p "$RECORD_DIR"
-  echo "$INSTALLED_VERSION" | sudo tee "$RECORD_FILE" >/dev/null
+  ${SUDO} mkdir -p "$RECORD_DIR"
+  echo "$INSTALLED_VERSION" | ${SUDO} tee "$RECORD_FILE" >/dev/null
 else
   msg "Skipping install (-n specified)"
 fi
@@ -140,13 +143,13 @@ if (( DO_INSTALL && UPDATE_GRUB )); then
   msg "Updating GRUB config"
   if [[ -f /etc/fedora-release ]]; then
     # FedoraはBLS有効が既定。通常は不要だが、明示要求時のみ実施。
-    sudo grub2-mkconfig -o /boot/grub2/grub.cfg || true
+    ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg || true
   else
     # 環境に合わせて調整が必要
     if [[ -d /boot/grub ]]; then
-      sudo grub-mkconfig -o /boot/grub/grub.cfg
+      ${SUDO} grub-mkconfig -o /boot/grub/grub.cfg
     elif [[ -d /boot/grub2 ]]; then
-      sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+      ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg
     else
       echo "GRUB directory not found; skip."
     fi
