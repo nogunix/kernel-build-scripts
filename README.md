@@ -1,15 +1,100 @@
- kernel-build-scripts
+# kernel-build-scripts
 
-Linuxカーネルをビルド／インストールするためのシンプルなスクリプト集。
+Linux カーネルを簡単・安全にビルド／インストール／アンインストールするためのスクリプト集です。  
+Fedora 環境での利用を想定していますが、他ディストリでも依存パッケージを導入すれば利用可能です。
 
-## Requirements
-- Fedora（他ディストリも可）
-- 必要パッケージ: gcc make ncurses-devel flex bison elfutils-libelf-devel openssl-devel bc
+## 構成
 
-## Usage
+| ファイル          | 役割 |
+| ----------------- | ---- |
+| **install.sh**    | カーネルの取得・設定・ビルド・インストールを行う |
+| **uninstall.sh**  | 不要なカーネルを安全に削除する（記録された直前インストール分を優先） |
+
+---
+
+## install.sh
+
+### 主な機能
+- `kernel.org` の公式リポジトリから Linux カーネルを取得
+- 現在のカーネル設定をベースに `make olddefconfig` または `localmodconfig` を適用
+- 並列ビルド (`-jN`) に対応
+- インストール後に直近インストールしたカーネルのバージョンを記録  
+  `/var/lib/kernel-build-scripts/last-installed`
+
+### オプション一覧
+
+| オプション | 説明 | 例 |
+| ---------- | ---- | -- |
+| `-j N`     | 並列ビルド数を指定（既定: CPUコア数） | `-j 8` |
+| `-d DIR`   | カーネルソースディレクトリを指定（既定: linux） | `-d linux-src` |
+| `-b REF`   | チェックアウトするブランチ/タグ | `-b v6.11-rc1` |
+| `-n`       | ビルドのみ（インストールなし） | `-n` |
+| `-g`       | GRUB設定を更新（通常Fedoraでは不要） | `-g` |
+| `-L`       | `make localmodconfig` を使用（稼働中モジュールに最適化） | `-L` |
+
+### 例
 ```bash
-# ビルド＆インストール（例）
-chmod +x install.sh uninstall.sh
-./install.sh  # カーネルをビルドして /boot に導入、grub 更新など
-# ロールバック
+# 現在の設定を使ってビルド＆インストール
+./install.sh
+
+# 稼働中モジュールに合わせて設定を最適化
+./install.sh -L
+
+# ブランチ/タグ指定
+./install.sh -b v6.11-rc1
+
+# インストールせずビルドのみ
+./install.sh -n
+````
+
+---
+
+## uninstall.sh
+
+### 主な機能
+
+* 記録ファイル `/var/lib/kernel-build-scripts/last-installed` に基づき削除対象を自動決定
+* 起動中カーネル・既定起動カーネルは削除禁止
+* Fedora/BLS 環境では `kernel-install remove` を使用し安全に削除
+* 非BLS 環境では手動でファイル削除＋`grub-mkconfig`／`grub2-mkconfig` 実行
+* ドライラン (`-n`)・自動Yes (`-y`) 対応
+
+### オプション一覧
+
+| オプション        | 説明                  | 例                |
+| ------------ | ------------------- | ---------------- |
+| `-v VERSION` | 削除するカーネルバージョンを指定    | `-v 6.16.0-rc5+` |
+| `-n`         | ドライラン（削除しないで手順のみ表示） | `-n`             |
+| `-y`         | 確認なしで削除を実行          | `-y`             |
+
+### 例
+
+```bash
+# 記録された直近インストール分を削除
 ./uninstall.sh
+
+# バージョンを指定して削除
+./uninstall.sh -v 6.16.0-rc5+
+
+# 確認なしで削除
+./uninstall.sh -y
+
+# ドライラン
+./uninstall.sh -n
+```
+
+---
+
+## 注意
+
+* **rootで直接実行しない**でください。`sudo` は内部で必要に応じて呼び出します。
+* カーネルのビルドや削除はシステムに影響が大きいため、実行前に必ず重要なデータをバックアップしてください。
+
+---
+
+## ライセンス
+
+MIT License
+
+````
+
