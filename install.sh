@@ -52,7 +52,7 @@ while getopts ":j:d:b:ngLh" opt; do
     L) USE_LOCALMODCONFIG=1 ;;
     h) usage; exit 0 ;;
     *) usage; exit 2 ;;
-  endesac
+  esac
 done
 
 # --- Sanity checks ---
@@ -186,4 +186,3 @@ ELAPSED=$((END_TIME - START_TIME))
 echo
 echo "✅ Done. Total elapsed: ${ELAPSED}s (~$((ELAPSED/60)) min). Log: $LOGFILE"
 echo "===== Kernel Build Finished: $(date) ====="
-
