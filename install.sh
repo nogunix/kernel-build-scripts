@@ -10,6 +10,9 @@ UPDATE_GRUB=0                # Fedora+BLSは通常不要。必要なら -g
 USE_LOCALMODCONFIG=0         # 有効なら -L
 LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
 
+# 非rootでmodulesをステージする先
+STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # 相対OK。-d 変更前に使うので環境変数でも上書き可。
+
 # --- Helpers ---
 usage() {
   cat <<EOF
@@ -20,6 +23,8 @@ Usage: $0 [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L]
   -n     : インストールを行わない（buildのみ）
   -g     : GRUB設定を更新する（通常Fedoraでは不要）
   -L     : make localmodconfig を使う（稼働中モジュールに最適化）
+環境変数:
+  STAGING_DIR : modules_install の INSTALL_MOD_PATH（既定: \$PWD/_staging）
 EOF
 }
 
@@ -47,7 +52,7 @@ while getopts ":j:d:b:ngLh" opt; do
     L) USE_LOCALMODCONFIG=1 ;;
     h) usage; exit 0 ;;
     *) usage; exit 2 ;;
-  esac
+  endesac
 done
 
 # --- Sanity checks ---
@@ -58,7 +63,7 @@ else
   need sudo
 fi
 
-need git; need make; need tee
+need git; need make; need tee; need rsync
 
 # Log both to console and file
 exec > >(tee -a "$LOGFILE") 2>&1
@@ -67,6 +72,7 @@ START_TIME=$(date +%s)
 echo "===== Kernel Build Started: $(date) ====="
 echo "Dir=${KERNEL_SRC_DIR}  Ref=${BRANCH_OR_TAG}  -j${MAKE_JOBS}"
 echo "Install=${DO_INSTALL}  UpdateGRUB=${UPDATE_GRUB}  localmodconfig=${USE_LOCALMODCONFIG}"
+echo "StagingDir=${STAGING_DIR}"
 
 # --- Step 1: Dependencies (Fedora only) ---
 msg "Checking/Installing build dependencies (Fedora only)"
@@ -74,7 +80,7 @@ if [[ -f /etc/fedora-release ]]; then
   need dnf
   ${SUDO} dnf -y builddep kernel
 else
-  echo "Note: Non-Fedora detected. Ensure kernel build deps are installed (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, etc.)."
+  echo "Note: Non-Fedora detected. Ensure build deps (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, dwarves, etc.)"
 fi
 
 # --- Step 2: Clone or update source ---
@@ -85,10 +91,9 @@ fi
 
 cd "$KERNEL_SRC_DIR"
 git fetch --tags origin
-# BRANCH_OR_TAG がタグかブランチか気にせず checkout
 git checkout -f "$BRANCH_OR_TAG" || die "Cannot checkout $BRANCH_OR_TAG"
-# ブランチの場合は最新へ
-if git rev-parse --abbrev-ref HEAD >/dev/null 2>&1 && [[ "$(git rev-parse --abbrev-ref HEAD)" != "HEAD" ]]; then
+# ブランチなら fast-forward 更新
+if [[ "$(git rev-parse --abbrev-ref HEAD)" != "HEAD" ]]; then
   git pull --ff-only || die "git pull failed (non-ff?)"
 fi
 
@@ -110,26 +115,45 @@ else
   make olddefconfig
 fi
 
-# --- Step 4: Build ---
+# --- Step 4: Build (non-root, signs modules here if enabled) ---
 msg "Building the kernel (this may take a while)"
 make -j"${MAKE_JOBS}"
 
-# --- Step 5: Install (optional) ---
+# --- Step 5: Install (非rootでステージ → rootで同期) ---
 if (( DO_INSTALL )); then
-  msg "Installing modules"
-  ${SUDO} make modules_install
+  msg "Staging modules to INSTALL_MOD_PATH (non-root)"
+  # 例: ${SRC}/_staging/lib/modules/<version> 配下に配置される
+  rm -rf -- "${STAGING_DIR}"
+  mkdir -p "${STAGING_DIR}"
+  make modules_install INSTALL_MOD_PATH="${STAGING_DIR}"
 
-  msg "Installing kernel (calls kernel-install on Fedora)"
-  ${SUDO} make install
+  # インストール対象のバージョン特定（ステージングから取得）
+  STAGED_VERSION="$(
+    find "${STAGING_DIR}/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+      | head -n1
+  )"
+  [[ -n "${STAGED_VERSION:-}" ]] || die "Failed to detect staged modules version"
+  echo "Staged modules version: ${STAGED_VERSION}"
+
+  msg "Syncing staged modules into /lib/modules (root only for this step)"
+  sudo rsync -a "${STAGING_DIR}/lib/modules/${STAGED_VERSION}/" "/lib/modules/${STAGED_VERSION}/"
+
+  msg "Running depmod for ${STAGED_VERSION}"
+  sudo depmod -a "${STAGED_VERSION}"
+
+  msg "Installing kernel image & BLS entries (root)"
+  # Fedora系は kernel-install 経由。ここはrootでOK
+  sudo make install
+
   # 記録ディレクトリ
   RECORD_DIR="/var/lib/kernel-build-scripts"
   RECORD_FILE="$RECORD_DIR/last-installed"
 
   # /lib/modules 配下で最終更新が新しいものを1つ取得
-INSTALLED_VERSION="$(
-  find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' \
-  | sort -nr | awk 'NR==1{print $2}'
-)"
+  INSTALLED_VERSION="$(
+    find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' \
+      | sort -nr | awk 'NR==1{print $2}'
+  )"
 
   echo "Recording installed kernel version: $INSTALLED_VERSION"
   ${SUDO} mkdir -p "$RECORD_DIR"
@@ -145,7 +169,6 @@ if (( DO_INSTALL && UPDATE_GRUB )); then
     # FedoraはBLS有効が既定。通常は不要だが、明示要求時のみ実施。
     ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg || true
   else
-    # 環境に合わせて調整が必要
     if [[ -d /boot/grub ]]; then
       ${SUDO} grub-mkconfig -o /boot/grub/grub.cfg
     elif [[ -d /boot/grub2 ]]; then
@@ -163,3 +186,4 @@ ELAPSED=$((END_TIME - START_TIME))
 echo
 echo "✅ Done. Total elapsed: ${ELAPSED}s (~$((ELAPSED/60)) min). Log: $LOGFILE"
 echo "===== Kernel Build Finished: $(date) ====="
+
