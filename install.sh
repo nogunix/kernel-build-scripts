@@ -10,6 +10,8 @@ UPDATE_GRUB=0                # Fedora+BLSは通常不要。必要なら -g
 USE_LOCALMODCONFIG=0         # 有効なら -L
 LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
 
+SUDO_KEEPALIVE_PID=""        # sudo keep-alive プロセスのPID
+
 # 非rootでmodulesをステージする先
 STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # 相対OK。-d 変更前に使うので環境変数でも上書き可。
 
@@ -34,6 +36,12 @@ need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 
 cleanup() {
   local ec=$?
+  # sudo keep-alive プロセスを停止
+  if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
+    # シェルが終了する際にバックグラウンドジョブもkillされるが、念のため明示的に停止
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  fi
+
   if (( ec != 0 )); then
     echo
     echo "❌ Failed with exit code $ec. See log: $LOGFILE" >&2
@@ -61,6 +69,12 @@ if [[ "$(id -u)" -eq 0 ]]; then
 else
   SUDO="sudo"
   need sudo
+  # スクリプト実行中にsudoのタイムアウトを防ぐ
+  # 最初にパスワードを尋ね、バックグラウンドでタイムスタンプを更新し続ける
+  msg "sudo のタイムアウトを回避するため、認証を更新します..."
+  sudo -v
+  ( while true; do sleep 60; sudo -n true; done ) &
+  SUDO_KEEPALIVE_PID=$!
 fi
 
 need git; need make; need tee; need rsync

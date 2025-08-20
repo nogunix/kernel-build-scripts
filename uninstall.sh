@@ -6,6 +6,8 @@ TARGET_VERSION=""     # -v で指定。未指定なら自動選択
 DRY_RUN=0             # -n で有効
 ASSUME_YES=0          # -y で有効
 LOGFILE="uninstall_$(date +%Y%m%d_%H%M%S).log"
+SUDO_KEEPALIVE_PID="" # sudo keep-alive プロセスのPID
+
 
 # --- Helpers ---
 msg(){ printf "\n--> %s\n" "$*"; }
@@ -31,6 +33,12 @@ EOF
 
 cleanup(){
   local ec=$?
+  # sudo keep-alive プロセスを停止
+  if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
+    # シェルが終了する際にバックグラウンドジョブもkillされるが、念のため明示的に停止
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  fi
+
   if (( ec != 0 )); then
     echo
     echo "❌ Failed with exit code $ec. See log: $LOGFILE" >&2
@@ -55,6 +63,12 @@ if [[ "$(id -u)" -eq 0 ]]; then
 else
   SUDO="sudo"
   need sudo
+  # スクリプト実行中にsudoのタイムアウトを防ぐ
+  # 最初にパスワードを尋ね、バックグラウンドでタイムスタンプを更新し続ける
+  msg "sudo のタイムアウトを回避するため、認証を更新します..."
+  sudo -v
+  ( while true; do sleep 60; sudo -n true; done ) &
+  SUDO_KEEPALIVE_PID=$!
 fi
 
 need find
