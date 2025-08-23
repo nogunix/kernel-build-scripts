@@ -18,7 +18,7 @@ STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # 相対OK。-d 変更前に使う�
 # --- Helpers ---
 usage() {
   cat <<EOF
-Usage: $0 [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L]
+Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L]
   -j N   : make -jN（既定: $(nproc) or \$MAKE_JOBS)
   -d DIR : カーネルソースディレクトリ（既定: linux）
   -b REF : チェックアウトするブランチ/タグ（既定: master）

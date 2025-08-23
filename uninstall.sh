@@ -23,7 +23,7 @@ run() {
 
 usage(){
   cat <<EOF
-Usage: $0 [-v VERSION] [-n] [-y]
+Usage: $(basename "$0") [-v VERSION] [-n] [-y]
   -v VERSION : 削除するカーネルバージョン（例: 6.16.0-rc5+）
                未指定なら uname -r 以外で最新を自動選択
   -n         : ドライラン（実際には削除しない）
