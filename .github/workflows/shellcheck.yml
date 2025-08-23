@@ -1,13 +1,21 @@
 name: ShellCheck
+
+# push時とpull_request時に実行
 on:
   push:
+    branches: [ main ] # mainブランチへのpushのみを対象にする場合
   pull_request:
+    branches: [ main ] # mainブランチへのPRのみを対象にする場合
+
 jobs:
   shellcheck:
+    name: Shellcheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Run shellcheck
-        run: shellcheck install.sh uninstall.sh
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: './' # ルートディレクトリから全てのシェルスクリプトをスキャン
