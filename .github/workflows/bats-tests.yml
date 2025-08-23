@@ -1,0 +1,25 @@
+name: Bats Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive' # サブモジュールもチェックアウトする
+
+    - name: Setup Bats
+      run: |
+        cd test/bats-core
+        sudo ./install.sh /usr/local
+
+    - name: Run bats tests
+      run: bats test/
