@@ -93,6 +93,9 @@ msg "Checking/Installing build dependencies (Fedora only)"
 if [[ -f /etc/fedora-release ]]; then
   need dnf
   ${SUDO} dnf -y builddep kernel
+  ${SUDO} dnf install -y git-email patch ctags cscope sparse coccinelle \
+    gcc clang llvm make bc ncurses-devel openssl-devel dwarves \
+    perl-Email-Address perl-TermReadKey
 else
   echo "Note: Non-Fedora detected. Ensure build deps (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, dwarves, etc.)"
 fi
