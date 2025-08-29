@@ -3,30 +3,30 @@ set -euo pipefail
 
 # --- Defaults ---
 KERNEL_SRC_DIR="linux"
-BRANCH_OR_TAG="master"       # torvalds/linux の既定
+BRANCH_OR_TAG="master"       # Default for torvalds/linux
 MAKE_JOBS="${MAKE_JOBS:-$(nproc)}"
-DO_INSTALL=1                 # 0 で build のみ
-UPDATE_GRUB=0                # Fedora+BLSは通常不要。必要なら -g
-USE_LOCALMODCONFIG=0         # 有効なら -L
+DO_INSTALL=1                 # 0 for build only
+UPDATE_GRUB=0                # Usually not needed for Fedora+BLS. Use -g if required.
+USE_LOCALMODCONFIG=0         # Enable with -L
 LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
 
-SUDO_KEEPALIVE_PID=""        # sudo keep-alive プロセスのPID
+SUDO_KEEPALIVE_PID=""        # PID of the sudo keep-alive process
 
-# 非rootでmodulesをステージする先
-STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # 相対OK。-d 変更前に使うので環境変数でも上書き可。
+# Destination for staging modules as non-root
+STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # Relative paths are OK. Can be overridden by environment variable before -d changes.
 
 # --- Helpers ---
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L]
-  -j N   : make -jN（既定: $(nproc) or \$MAKE_JOBS)
-  -d DIR : カーネルソースディレクトリ（既定: linux）
-  -b REF : チェックアウトするブランチ/タグ（既定: master）
-  -n     : インストールを行わない（buildのみ）
-  -g     : GRUB設定を更新する（通常Fedoraでは不要）
-  -L     : make localmodconfig を使う（稼働中モジュールに最適化）
-環境変数:
-  STAGING_DIR : modules_install の INSTALL_MOD_PATH（既定: \$PWD/_staging）
+  -j N   : make -jN (default: $(nproc) or $MAKE_JOBS)
+  -d DIR : Kernel source directory (default: linux)
+  -b REF : Branch/tag to checkout (default: master)
+  -n     : Do not install (build only)
+  -g     : Update GRUB configuration (usually not needed for Fedora)
+  -L     : Use make localmodconfig (optimizes for running modules)
+Environment variables:
+  STAGING_DIR : INSTALL_MOD_PATH for modules_install (default: $PWD/_staging)
 EOF
 }
 
@@ -36,9 +36,9 @@ need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 
 cleanup() {
   local ec=$?
-  # sudo keep-alive プロセスを停止
+  # PID of the sudo keep-alive process
   if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
-    # シェルが終了する際にバックグラウンドジョブもkillされるが、念のため明示的に停止
+    # Background jobs are killed when the shell exits, but explicitly stop for safety
     kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
   fi
 
@@ -50,7 +50,7 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Parse options ---
-while getopts ":j:d:b:ngLh" opt; do
+while getopts ":j:d:b:ngLh" opt;
   case "$opt" in
     j) MAKE_JOBS="$OPTARG" ;;
     d) KERNEL_SRC_DIR="$OPTARG" ;;
@@ -69,12 +69,12 @@ if [[ "$(id -u)" -eq 0 ]]; then
 else
   SUDO="sudo"
   need sudo
-  # スクリプト実行中にsudoのタイムアウトを防ぐ
-  # 最初にパスワードを尋ね、バックグラウンドでタイムスタンプを更新し続ける
-  msg "sudo のタイムアウトを回避するため、認証を更新します..."
+  # Prevent sudo timeout during script execution
+  # Ask for password initially, then keep updating timestamp in background
+  msg "Updating sudo authentication to prevent timeout..."
   sudo -v
   ( while true; do sleep 60; sudo -n true; done ) &
-  SUDO_KEEPALIVE_PID=$!
+  SUDO_KEEPALIVE_PID=$! 
 fi
 
 need git; need make; need tee; need rsync
@@ -93,9 +93,7 @@ msg "Checking/Installing build dependencies (Fedora only)"
 if [[ -f /etc/fedora-release ]]; then
   need dnf
   ${SUDO} dnf -y builddep kernel
-  ${SUDO} dnf install -y git-email patch ctags cscope sparse coccinelle \
-    gcc clang llvm make bc ncurses-devel openssl-devel dwarves \
-    perl-Email-Address perl-TermReadKey
+  ${SUDO} dnf -y install make gcc flex bison openssl-devel elfutils-libelf-devel ncurses-devel bc dwarves
 else
   echo "Note: Non-Fedora detected. Ensure build deps (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, dwarves, etc.)"
 fi
@@ -109,7 +107,7 @@ fi
 cd "$KERNEL_SRC_DIR"
 git fetch --tags origin
 git checkout -f "$BRANCH_OR_TAG" || die "Cannot checkout $BRANCH_OR_TAG"
-# ブランチなら fast-forward 更新
+# If it's a branch, perform a fast-forward update
 if [[ "$(git rev-parse --abbrev-ref HEAD)" != "HEAD" ]]; then
   git pull --ff-only || die "git pull failed (non-ff?)"
 fi
@@ -136,15 +134,15 @@ fi
 msg "Building the kernel (this may take a while)"
 make -j"${MAKE_JOBS}"
 
-# --- Step 5: Install (非rootでステージ → rootで同期) ---
+# --- Step 5: Install (Stage as non-root -> Sync as root) ---
 if (( DO_INSTALL )); then
   msg "Staging modules to INSTALL_MOD_PATH (non-root)"
-  # 例: ${SRC}/_staging/lib/modules/<version> 配下に配置される
+  # Example: Placed under ${SRC}/_staging/lib/modules/<version>
   rm -rf -- "${STAGING_DIR}"
   mkdir -p "${STAGING_DIR}"
   make modules_install INSTALL_MOD_PATH="${STAGING_DIR}"
 
-  # インストール対象のバージョン特定（ステージングから取得）
+  # Identify the target version for installation (obtained from staging)
   STAGED_VERSION="$(
     find "${STAGING_DIR}/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
       | head -n1
@@ -159,14 +157,14 @@ if (( DO_INSTALL )); then
   sudo depmod -a "${STAGED_VERSION}"
 
   msg "Installing kernel image & BLS entries (root)"
-  # Fedora系は kernel-install 経由。ここはrootでOK
+  # Fedora uses kernel-install. Root is fine here.
   sudo make install
 
-  # 記録ディレクトリ
+  # Record directory
   RECORD_DIR="/var/lib/kernel-build-scripts"
   RECORD_FILE="$RECORD_DIR/last-installed"
 
-  # /lib/modules 配下で最終更新が新しいものを1つ取得
+  # Get the most recently updated one under /lib/modules
   INSTALLED_VERSION="$(
     find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' \
       | sort -nr | awk 'NR==1{print $2}'
@@ -183,7 +181,7 @@ fi
 if (( DO_INSTALL && UPDATE_GRUB )); then
   msg "Updating GRUB config"
   if [[ -f /etc/fedora-release ]]; then
-    # FedoraはBLS有効が既定。通常は不要だが、明示要求時のみ実施。
+    # Fedora has BLS enabled by default. Usually not needed, but performed only if explicitly requested.
     ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg || true
   else
     if [[ -d /boot/grub ]]; then
@@ -197,6 +195,7 @@ if (( DO_INSTALL && UPDATE_GRUB )); then
 else
   msg "Skipping GRUB update"
 fi
+
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))

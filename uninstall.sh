@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # --- Defaults ---
-TARGET_VERSION=""     # -v で指定。未指定なら自動選択
-DRY_RUN=0             # -n で有効
-ASSUME_YES=0          # -y で有効
+TARGET_VERSION=""     # Specified with -v. Auto-selected if not specified.
+DRY_RUN=0             # Enabled with -n
+ASSUME_YES=0          # Enabled with -y
 LOGFILE="uninstall_$(date +%Y%m%d_%H%M%S).log"
-SUDO_KEEPALIVE_PID="" # sudo keep-alive プロセスのPID
+SUDO_KEEPALIVE_PID="" # PID of the sudo keep-alive process
 
 
 # --- Helpers ---
@@ -24,18 +24,18 @@ run() {
 usage(){
   cat <<EOF
 Usage: $(basename "$0") [-v VERSION] [-n] [-y]
-  -v VERSION : 削除するカーネルバージョン（例: 6.16.0-rc5+）
-               未指定なら uname -r 以外で最新を自動選択
-  -n         : ドライラン（実際には削除しない）
-  -y         : 確認をスキップして実行
+  -v VERSION : Kernel version to delete (e.g., 6.16.0-rc5+)
+               If not specified, automatically selects the latest except for uname -r
+  -n         : Dry run (shows steps without actual deletion)
+  -y         : Execute without confirmation
 EOF
 }
 
 cleanup(){
   local ec=$?
-  # sudo keep-alive プロセスを停止
+  # Stop the sudo keep-alive process
   if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
-    # シェルが終了する際にバックグラウンドジョブもkillされるが、念のため明示的に停止
+    # Background jobs are killed when the shell exits, but explicitly stop for safety
     kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
   fi
 
@@ -49,11 +49,11 @@ trap cleanup EXIT
 # --- Parse options ---
 while getopts ":v:nyh" opt; do
   case "$opt" in
-    v) TARGET_VERSION="$OPTARG" ;;
-    n) DRY_RUN=1 ;;
-    y) ASSUME_YES=1 ;;
-    h) usage; exit 0 ;;
-    *) usage; exit 2 ;;
+    v) TARGET_VERSION="$OPTARG" ;; 
+    n) DRY_RUN=1 ;; 
+    y) ASSUME_YES=1 ;; 
+    h) usage; exit 0 ;; 
+    *) usage; exit 2 ;; 
   esac
 done
 
@@ -63,9 +63,9 @@ if [[ "$(id -u)" -eq 0 ]]; then
 else
   SUDO="sudo"
   need sudo
-  # スクリプト実行中にsudoのタイムアウトを防ぐ
-  # 最初にパスワードを尋ね、バックグラウンドでタイムスタンプを更新し続ける
-  msg "sudo のタイムアウトを回避するため、認証を更新します..."
+  # Prevent sudo timeout during script execution
+  # Ask for password initially, then keep updating timestamp in background
+  msg "Updating sudo authentication to prevent timeout..."
   sudo -v
   ( while true; do sleep 60; sudo -n true; done ) &
   SUDO_KEEPALIVE_PID=$!
@@ -75,8 +75,9 @@ need find
 need uname
 need tee
 
-# ログ
+# Logging
 exec > >(tee -a "$LOGFILE") 2>&1
+
 
 RUNNING="$(uname -r)"
 ALL_VERSIONS=()
