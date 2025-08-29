@@ -1,6 +1,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/nogunix/kernel-build-scripts/main.svg)](https://github.com/nogunix/kernel-build-scripts/commits/main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bats Tests](https://github.com/nogunix/kernel-build-scripts/actions/workflows/bats-tests.yml/badge.svg)](https://github.com/nogunix/kernel-build-scripts/actions/workflows/bats-tests.yml)
+[![ShellCheck](https://github.com/nogunix/kernel-build-scripts/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/nogunix/kernel-build-scripts/actions/workflows/shellcheck.yml)
 
 # kernel-build-scripts
 
