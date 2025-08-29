@@ -1,3 +1,7 @@
+[![bats-tests](https://github.com/mnoguchi/kernel-build-scripts/actions/workflows/bats-tests.yml/badge.svg)](https://github.com/mnoguchi/kernel-build-scripts/actions/workflows/bats-tests.yml)
+[![shellcheck](https://github.com/mnoguchi/kernel-build-scripts/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/mnoguchi/kernel-build-scripts/actions/workflows/shellcheck.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 # kernel-build-scripts
 
 A collection of scripts for easily and safely building, installing, and uninstalling the Linux kernel.
