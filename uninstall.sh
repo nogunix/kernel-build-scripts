@@ -85,87 +85,88 @@ ALL_VERSIONS=()
 	find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V
 )
 
-(( ${#ALL_VERSIONS[@]} )) || die "/lib/modules にカーネルが見つかりません。"
+(( ${#ALL_VERSIONS[@]} )) || die "No kernels found in /lib/modules."
 
-# 少なくとも2つ以上（保険）
+# At least two (for safety)
 if (( ${#ALL_VERSIONS[@]} <= 1 )); then
-  die "残り1つのカーネルのみです。削除を中止します。"
+  die "Only one kernel remains. Aborting deletion."
 fi
 
-# 既定ブートカーネル（可能なら grubby から取得）
+# Default boot kernel (get from grubby if possible)
 DEFAULT_VERSION=""
 if command -v grubby >/dev/null 2>&1; then
-  # 例: /boot/vmlinuz-6.16.0-rc5+ → 末尾のバージョンを抽出
+  # Example: /boot/vmlinuz-6.16.0-rc5+ -> extract version from end
   DEFAULT_KERNEL_PATH="$(grubby --default-kernel 2>/dev/null || true)"
   if [[ -n "$DEFAULT_KERNEL_PATH" ]]; then
     DEFAULT_VERSION="${DEFAULT_KERNEL_PATH##*/vmlinuz-}"
   fi
 fi
 
-# 対象決定
+# Determine target
 RECORD_FILE="/var/lib/kernel-build-scripts/last-installed"
 if [[ -z "$TARGET_VERSION" && -f "$RECORD_FILE" ]]; then
   TARGET_VERSION=$(<"$RECORD_FILE")
   echo "Using recorded installed kernel version: $TARGET_VERSION"
 fi
 
-msg "削除対象: $TARGET_VERSION"
-echo "走行中: $RUNNING"
-echo "既定起動: ${DEFAULT_VERSION:-"(取得不可)"}"
-echo "インストール済: ${ALL_VERSIONS[*]}"
+msg "Target for deletion: $TARGET_VERSION"
+echo "Running: $RUNNING"
+echo "Default boot: ${DEFAULT_VERSION:-"(unavailable)"}"
+echo "Installed: ${ALL_VERSIONS[*]}"
 
-# 危険防止
+# Danger prevention
 if [[ "$TARGET_VERSION" == "$RUNNING" ]]; then
-  die "現在起動中のカーネル ($RUNNING) は削除できません。"
+  die "Cannot delete the currently running kernel ($RUNNING)."
 fi
 if [[ -n "$DEFAULT_VERSION" && "$TARGET_VERSION" == "$DEFAULT_VERSION" ]]; then
-  die "既定起動のカーネル ($DEFAULT_VERSION) は削除できません。先に既定を切り替えてください。"
+  die "Cannot delete the default boot kernel ($DEFAULT_VERSION). Please switch the default first."
 fi
 
-# 対象の存在確認
+# Check target existence
 MODULES_DIR="/lib/modules/$TARGET_VERSION"
-[[ -d "$MODULES_DIR" ]] || die "$MODULES_DIR が見つかりません。"
+[[ -d "$MODULES_DIR" ]] || die "$MODULES_DIR not found."
 
-# Fedora/BLS 環境の検出
+# Detect Fedora/BLS environment
 IS_BLS=0
 if [[ -d /boot/loader/entries ]] || [[ -f /etc/kernel/install.conf ]] || command -v kernel-install >/dev/null 2>&1; then
   IS_BLS=1
 fi
 
-# ファイルパス候補
+# Candidate file paths
 KERNEL_IMG="/boot/vmlinuz-$TARGET_VERSION"
 INITRAMFS_IMG="/boot/initramfs-$TARGET_VERSION.img"
 CONFIG_FILE="/boot/config-$TARGET_VERSION"
 SYSTEMMAP_FILE="/boot/System.map-$TARGET_VERSION"
 readarray -t LOADER_ENTRIES < <(find /boot/loader/entries/ -maxdepth 1 -type f -name "*-$TARGET_VERSION.conf" 2>/dev/null || true)
 
-# 実行前の確認
+# Confirmation before execution
 if (( !ASSUME_YES )); then
   echo
-  echo "以下を削除します（検出できたもののみ）："
+  echo "The following will be deleted (only if detected):"
   [[ -e "$KERNEL_IMG" ]] && echo "  $KERNEL_IMG"
   [[ -e "$INITRAMFS_IMG" ]] && echo "  $INITRAMFS_IMG"
   [[ -e "$CONFIG_FILE" ]] && echo "  $CONFIG_FILE"
   [[ -e "$SYSTEMMAP_FILE" ]] && echo "  $SYSTEMMAP_FILE"
   [[ ${#LOADER_ENTRIES[@]} -gt 0 ]] && printf "  %s\n" "${LOADER_ENTRIES[@]}"
   echo "  $MODULES_DIR"
-  read -rp "本当に削除しますか？ [y/N] " ans
-  [[ "${ans:-N}" =~ ^[Yy]$ ]] || die "中止しました。"
+  read -rp "Are you sure you want to delete? [y/N] " ans
+  [[ "${ans:-N}" =~ ^[Yy]$ ]] || die "Aborted."
 fi
 
-# --- 実処理 ---
+
+# --- Actual processing ---
 if (( IS_BLS )) && command -v kernel-install >/dev/null 2>&1; then
-  msg "BLS 環境を検出: kernel-install でエントリを削除します"
-  # kernel-install は root 必須
+  msg "BLS environment detected: Deleting entry with kernel-install"
+  # kernel-install requires root
   run ${SUDO} kernel-install remove "$TARGET_VERSION"
 else
-  msg "非BLS/手動モード: 直接ファイルを削除します"
+  msg "Non-BLS/Manual mode: Deleting files directly"
   run ${SUDO} rm -f "$KERNEL_IMG" "$INITRAMFS_IMG" "$CONFIG_FILE" "$SYSTEMMAP_FILE"
   if (( ${#LOADER_ENTRIES[@]} )); then
     run ${SUDO} rm -f "${LOADER_ENTRIES[@]}"
   fi
 
-  # GRUB再生成（自動検出）
+  # GRUB regeneration (auto-detection)
   if command -v grub2-mkconfig >/dev/null 2>&1 && [[ -d /boot/grub2 ]]; then
     msg "Updating GRUB (grub2-mkconfig)"
     run ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg
@@ -173,14 +174,14 @@ else
     msg "Updating GRUB (grub-mkconfig)"
     run ${SUDO} grub-mkconfig -o /boot/grub/grub.cfg
   else
-    echo "Note: GRUBの自動更新は実行されませんでした。必要なら手動で更新してください。"
+    echo "Note: GRUB was not automatically updated. Please update manually if necessary."
   fi
 fi
 
-# モジュールを最後に削除（依存ファイルが残っても参照されないように順序を考慮）
+# Delete modules last (consider order so that dependent files are not referenced if they remain)
 msg "Deleting modules directory: $MODULES_DIR"
 run ${SUDO} rm -rf "$MODULES_DIR"
 
 echo
-echo "✅ カーネル $TARGET_VERSION のアンインストールが完了しました。"
-echo "ログ: $LOGFILE"
+echo "✅ Uninstallation of kernel $TARGET_VERSION completed."
+echo "Log: $LOGFILE"
