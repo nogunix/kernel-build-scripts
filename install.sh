@@ -50,7 +50,7 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Parse options ---
-while getopts ":j:d:b:ngLh" opt;
+while getopts ":j:d:b:ngLh" opt; do
   case "$opt" in
     j) MAKE_JOBS="$OPTARG" ;;
     d) KERNEL_SRC_DIR="$OPTARG" ;;
