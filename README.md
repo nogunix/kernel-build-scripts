@@ -1,4 +1,4 @@
-[![Last Commit](https://img.shields.io/github/last-commit/mnoguchi/kernel-build-scripts/main.svg)](https://github.com/mnoguchi/kernel-build-scripts/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/nogunix/kernel-build-scripts/main.svg)](https://github.com/nogunix/kernel-build-scripts/commits/main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # kernel-build-scripts
