@@ -90,13 +90,9 @@ echo "StagingDir=${STAGING_DIR}"
 
 # --- Step 1: Dependencies (Fedora only) ---
 msg "Checking/Installing build dependencies (Fedora only)"
-if [[ -f /etc/fedora-release ]]; then
-  need dnf
-  ${SUDO} dnf -y builddep kernel
-  ${SUDO} dnf -y install make gcc flex bison openssl-devel elfutils-libelf-devel ncurses-devel bc dwarves
-else
-  echo "Note: Non-Fedora detected. Ensure build deps (gcc, make, ncurses-devel, flex, bison, elfutils-libelf-devel, openssl-devel, bc, dwarves, etc.)"
-fi
+need dnf
+${SUDO} dnf -y builddep kernel
+${SUDO} dnf -y install make gcc flex bison openssl-devel elfutils-libelf-devel ncurses-devel bc dwarves
 
 # --- Step 2: Clone or update source ---
 msg "Cloning/Updating Linux source"
@@ -182,18 +178,8 @@ fi
 # --- Step 6: GRUB update (optional) ---
 if (( DO_INSTALL && UPDATE_GRUB )); then
   msg "Updating GRUB config"
-  if [[ -f /etc/fedora-release ]]; then
-    # Fedora has BLS enabled by default. Usually not needed, but performed only if explicitly requested.
-    ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg || true
-  else
-    if [[ -d /boot/grub ]]; then
-      ${SUDO} grub-mkconfig -o /boot/grub/grub.cfg
-    elif [[ -d /boot/grub2 ]]; then
-      ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg
-    else
-      echo "GRUB directory not found; skip."
-    fi
-  fi
+  # Fedora has BLS enabled by default. Usually not needed, but performed only if explicitly requested.
+  ${SUDO} grub2-mkconfig -o /boot/grub2/grub.cfg || true
 else
   msg "Skipping GRUB update"
 fi
