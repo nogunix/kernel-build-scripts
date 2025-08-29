@@ -22,18 +22,4 @@ jobs:
         sudo ./install.sh /usr/local
 
     - name: Run bats tests
-      run: |
-        set -x # Enable shell debugging
-        bats test/
-
-    - name: Debug install.sh help output
-      run: |
-        echo "--- Output of install.sh -h ---"
-        ./install.sh -h 2>&1 | tee install_help_output.log
-        cat install_help_output.log
-
-    - name: Debug uninstall.sh help output
-      run: |
-        echo "--- Output of uninstall.sh -h ---"
-        ./uninstall.sh -h 2>&1 | tee uninstall_help_output.log
-        cat uninstall_help_output.log
+      run: bats test/
