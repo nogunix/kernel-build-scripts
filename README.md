@@ -1,100 +1,96 @@
 # kernel-build-scripts
 
-Linux カーネルを簡単・安全にビルド／インストール／アンインストールするためのスクリプト集です。  
-Fedora 環境での利用を想定していますが、他ディストリでも依存パッケージを導入すれば利用可能です。
+A collection of scripts for easily and safely building, installing, and uninstalling the Linux kernel.
+It is intended for use in Fedora environments, but can also be used in other distributions by installing the necessary dependencies.
 
-## 構成
+## Structure
 
-| ファイル          | 役割 |
-| ----------------- | ---- |
-| **install.sh**    | カーネルの取得・設定・ビルド・インストールを行う |
-| **uninstall.sh**  | 不要なカーネルを安全に削除する（記録された直前インストール分を優先） |
+| File            | Role                                                              |
+| --------------- | ----------------------------------------------------------------- |
+| **install.sh**  | Acquires, configures, builds, and installs the kernel             |
+| **uninstall.sh**| Safely removes unnecessary kernels (prioritizes the most recently installed one) |
 
----
 
 ## install.sh
 
-### 主な機能
-- `kernel.org` の公式リポジトリから Linux カーネルを取得
-- 現在のカーネル設定をベースに `make olddefconfig` または `localmodconfig` を適用
-- 並列ビルド (`-jN`) に対応
-- インストール後に直近インストールしたカーネルのバージョンを記録  
+### Key Features
+- Obtains the Linux kernel from the official `kernel.org` repository
+- Applies `make olddefconfig` or `localmodconfig` based on the current kernel configuration
+- Supports parallel builds (`-jN`)
+- Records the version of the most recently installed kernel after installation
   `/var/lib/kernel-build-scripts/last-installed`
 
-### オプション一覧
+### Options
 
-| オプション | 説明 | 例 |
-| ---------- | ---- | -- |
-| `-j N`     | 並列ビルド数を指定（既定: CPUコア数） | `-j 8` |
-| `-d DIR`   | カーネルソースディレクトリを指定（既定: linux） | `-d linux-src` |
-| `-b REF`   | チェックアウトするブランチ/タグ | `-b v6.11-rc1` |
-| `-n`       | ビルドのみ（インストールなし） | `-n` |
-| `-g`       | GRUB設定を更新（通常Fedoraでは不要） | `-g` |
-| `-L`       | `make localmodconfig` を使用（稼働中モジュールに最適化） | `-L` |
+| Option     | Description                                     | Example        |
+| ---------- | ----------------------------------------------- | -------------- |
+| `-j N`     | Specifies the number of parallel builds (default: CPU cores) | `-j 8`         |
+| `-d DIR`   | Specifies the kernel source directory (default: linux) | `-d linux-src` |
+| `-b REF`   | Branch/tag to checkout                          | `-b v6.11-rc1` |
+| `-n`       | Build only (no installation)                    | `-n`           |
+| `-g`       | Update GRUB configuration (usually not needed for Fedora) | `-g`           |
+| `-L`       | Use `make localmodconfig` (optimizes for currently running modules) | `-L`           |
 
-### 例
+### Examples
 ```bash
-# 現在の設定を使ってビルド＆インストール
+# Build and install using current configuration
 ./install.sh
 
-# 稼働中モジュールに合わせて設定を最適化
+# Optimize configuration for currently running modules
 ./install.sh -L
 
-# ブランチ/タグ指定
+# Specify branch/tag
 ./install.sh -b v6.11-rc1
 
-# インストールせずビルドのみ
+# Build only, no installation
 ./install.sh -n
 ````
 
----
 
 ## uninstall.sh
 
-### 主な機能
+### Key Features
 
-* 記録ファイル `/var/lib/kernel-build-scripts/last-installed` に基づき削除対象を自動決定
-* 起動中カーネル・既定起動カーネルは削除禁止
-* Fedora/BLS 環境では `kernel-install remove` を使用し安全に削除
-* 非BLS 環境では手動でファイル削除＋`grub-mkconfig`／`grub2-mkconfig` 実行
-* ドライラン (`-n`)・自動Yes (`-y`) 対応
+* Automatically determines the target for deletion based on the record file `/var/lib/kernel-build-scripts/last-installed`
+* Prohibits deletion of the currently running kernel or the default boot kernel
+* In Fedora/BLS environments, uses `kernel-install remove` for safe deletion
+* In non-BLS environments, manually deletes files and executes `grub-mkconfig` / `grub2-mkconfig`
+* Supports dry run (`-n`) and automatic Yes (`-y`)
 
-### オプション一覧
+### Options
 
-| オプション        | 説明                  | 例                |
-| ------------ | ------------------- | ---------------- |
-| `-v VERSION` | 削除するカーネルバージョンを指定    | `-v 6.16.0-rc5+` |
-| `-n`         | ドライラン（削除しないで手順のみ表示） | `-n`             |
-| `-y`         | 確認なしで削除を実行          | `-y`             |
+| Option        | Description                                     | Example          |
+| ------------- | ----------------------------------------------- | ---------------- |
+| `-v VERSION`  | Specifies the kernel version to delete          | `-v 6.16.0-rc5+` |
+| `-n`          | Dry run (shows steps without actual deletion)   | `-n`             |
+| `-y`          | Executes deletion without confirmation          | `-y`             |
 
-### 例
+### Examples
 
 ```bash
-# 記録された直近インストール分を削除
+# Delete the most recently recorded installed kernel
 ./uninstall.sh
 
-# バージョンを指定して削除
+# Delete a specific version
 ./uninstall.sh -v 6.16.0-rc5+
 
-# 確認なしで削除
+# Delete without confirmation
 ./uninstall.sh -y
 
-# ドライラン
+# Dry run
 ./uninstall.sh -n
 ```
 
----
 
-## 注意
+## Caution
 
-* rootで実行することもできますが、非rootユーザの場合は内部で必要に応じて `sudo` を呼び出します。
-* カーネルのビルドや削除はシステムに影響が大きいため、実行前に必ず重要なデータをバックアップしてください。
-
----
-
-## ライセンス
-
-MIT License
+* You can run as root, but if you are a non-root user, `sudo` will be called internally as needed.
+* Building and deleting kernels can significantly impact your system, so always back up important data before proceeding.
 
 
-このプロジェクトは私個人の活動であり、所属する企業・組織の業務や機密情報とは一切関係ありません。
+## License
+
+MIT License - see the [LICENSE](LICENSE) file for details.
+
+
+This is my personal project. It is created and maintained in my personal capacity, and has no relation to my employer's business or confidential information.
