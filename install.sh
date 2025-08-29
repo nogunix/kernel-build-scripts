@@ -77,7 +77,7 @@ else
   SUDO_KEEPALIVE_PID=$! 
 fi
 
-need git; need make; need tee; need rsync
+need git; need make; need tee; need rsync; need ccache
 
 # Log both to console and file
 exec > >(tee -a "$LOGFILE") 2>&1
@@ -132,6 +132,8 @@ fi
 
 # --- Step 4: Build (non-root, signs modules here if enabled) ---
 msg "Building the kernel (this may take a while)"
+export CC="ccache gcc"
+export CXX="ccache g++"
 make -j"${MAKE_JOBS}"
 
 # --- Step 5: Install (Stage as non-root -> Sync as root) ---
