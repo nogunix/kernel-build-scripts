@@ -140,15 +140,15 @@ if [[ -f "/boot/config-$(uname -r)" ]]; then
   fi
 else
   echo "No running config found; using defconfig"
-  make ${MAKE_VARS_COMMON[@]} defconfig
+  make "${MAKE_VARS_COMMON[@]}" defconfig
 fi
 
 if (( USE_LOCALMODCONFIG )); then
   echo "Optimizing with localmodconfig"
-  yes "" | make ${MAKE_VARS_COMMON[@]} localmodconfig
+  yes "" | make "${MAKE_VARS_COMMON[@]}" localmodconfig
 else
   echo "Updating .config with olddefconfig"
-  make ${MAKE_VARS_COMMON[@]} olddefconfig
+  make "${MAKE_VARS_COMMON[@]}" olddefconfig
 fi
 
 # --- Step 4: Build (non-root, signs modules here if enabled) ---
@@ -162,9 +162,9 @@ if [[ -n "$PARTIAL_M" ]]; then
 fi
 
 if [[ -n "$PARTIAL_M" ]]; then
-  make -j"${MAKE_JOBS}" ${MAKE_VARS_BUILD[@]} modules
+  make -j"${MAKE_JOBS}" "${MAKE_VARS_BUILD[@]}" modules
 else
-  make -j"${MAKE_JOBS}" ${MAKE_VARS_BUILD[@]}
+  make -j"${MAKE_JOBS}" "${MAKE_VARS_BUILD[@]}"
 fi
 
 # --- Step 5: Install (Stage as non-root -> Sync as root) ---
@@ -173,7 +173,7 @@ if (( DO_INSTALL )); then
   # Example: Placed under ${SRC}/_staging/lib/modules/<version>
   rm -rf -- "${STAGING_DIR}"
   mkdir -p "${STAGING_DIR}"
-  make ${MAKE_VARS_COMMON[@]} modules_install INSTALL_MOD_PATH="${STAGING_DIR}"
+  make "${MAKE_VARS_COMMON[@]}" modules_install INSTALL_MOD_PATH="${STAGING_DIR}"
 
   # Identify the target version for installation (obtained from staging)
   STAGED_VERSION="$(
@@ -191,7 +191,7 @@ if (( DO_INSTALL )); then
 
   msg "Installing kernel image & BLS entries (root)"
   # Fedora uses kernel-install. Root is fine here.
-  sudo make ${MAKE_VARS_COMMON[@]} install
+  sudo make "${MAKE_VARS_COMMON[@]}" install
 
   # Record directory
   RECORD_DIR="/var/lib/kernel-build-scripts"
