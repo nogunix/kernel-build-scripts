@@ -57,6 +57,45 @@ It is intended for use in Fedora environments, but can also be used in other dis
 ./install.sh -W 1 -M drivers/staging/xxx -O build -n
 ````
 
+### Staging W=1 practice (streamlined)
+
+To efficiently practice fixing `W=1` warnings in `drivers/staging`, use the built‑in `-S` workflow.
+
+It performs:
+- Create a broad config for modules: `allmodconfig`
+- Prepare generated headers (incl. asm): `modules_prepare`
+- Build only staging with warnings: `W=1 M=drivers/staging`
+- Save build output to a log and extract warnings
+
+Quick start (build dir as a sibling of `linux/`):
+
+```bash
+./install.sh -S -O ../build-staging
+```
+
+Defaults used by `-S`:
+- `-n` (build only)
+- `-W 1` (warnings)
+- `-M drivers/staging` (partial modules build)
+- `-C allmodconfig` (configuration target)
+- Build log: `../W1-staging.log` (relative to `linux/`)
+
+You can override any default, for example:
+
+```bash
+# Use a different out dir and focus on a sub-tree
+./install.sh -S -O ../build-staging -M drivers/staging/rtl8188eu
+```
+
+Warning extraction
+- The script prints a warning summary; to re-run manually:
+
+```bash
+rg -n "warning:" W1-staging.log || grep -n "warning:" W1-staging.log
+```
+
+Tip: Iterate by editing sources under `linux/`, then rerun the same command to rebuild only changed modules.
+
 ### Practice: Fix W=1 warnings in drivers/staging and create a patch
 
 Use this script to iterate on `drivers/staging/*` with `W=1` warnings and prepare patches.

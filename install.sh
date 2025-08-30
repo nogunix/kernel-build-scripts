@@ -15,6 +15,11 @@ WARN_LEVEL=""               # -W <level> -> make W=<level>
 PARTIAL_M=""                # -M <path>  -> make M=<path>
 OUT_DIR=""                  # -O <dir>   -> make O=<dir>
 
+# Config and workflow helpers
+CONFIG_TARGET=""            # -C <target> e.g., allmodconfig/olddefconfig/defconfig/localmodconfig
+STAGING_W1_MODE=0            # -S enables staging W=1 workflow
+STAGING_W1_LOG=""           # Path to tee the build output when -S is used
+
 SUDO_KEEPALIVE_PID=""        # PID of the sudo keep-alive process
 
 # Destination for staging modules as non-root
@@ -23,7 +28,7 @@ STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # Relative paths are OK. Can be ove
 # --- Helpers ---
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L] [-W N] [-M PATH] [-O DIR]
+Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L] [-W N] [-M PATH] [-O DIR] [-C TARGET] [-S]
   -j N   : make -jN (default: $(nproc) or $MAKE_JOBS)
   -d DIR : Kernel source directory (default: linux)
   -b REF : Branch/tag to checkout (default: master)
@@ -33,6 +38,8 @@ Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L] [-W N] [-
   -W N   : Warning level for kernel build (passes make W=N)
   -M PATH: Partial build target path (in-tree), passes make M=PATH and builds modules only
   -O DIR : Out-of-tree build directory (passes make O=DIR). Used for all make invocations
+  -C TARGET : Config target override (defconfig|olddefconfig|allmodconfig|localmodconfig)
+  -S     : Staging W=1 workflow (sets defaults: -n -W 1 -M drivers/staging -C allmodconfig; logs warnings)
 Environment variables:
   STAGING_DIR : INSTALL_MOD_PATH for modules_install (default: $PWD/_staging)
 EOF
@@ -58,7 +65,7 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Parse options ---
-while getopts ":j:d:b:ngLW:M:O:h" opt; do
+while getopts ":j:d:b:ngLW:M:O:C:Sh" opt; do
   case "$opt" in
     j) MAKE_JOBS="$OPTARG" ;;
     d) KERNEL_SRC_DIR="$OPTARG" ;;
@@ -69,10 +76,22 @@ while getopts ":j:d:b:ngLW:M:O:h" opt; do
     W) WARN_LEVEL="$OPTARG" ;;
     M) PARTIAL_M="$OPTARG" ;;
     O) OUT_DIR="$OPTARG" ;;
+    C) CONFIG_TARGET="$OPTARG" ;;
+    S) STAGING_W1_MODE=1 ;;
     h) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
 done
+
+# Apply staging W=1 workflow defaults
+if (( STAGING_W1_MODE )); then
+  DO_INSTALL=0
+  [[ -n "$WARN_LEVEL" ]] || WARN_LEVEL=1
+  [[ -n "$PARTIAL_M" ]] || PARTIAL_M="drivers/staging"
+  [[ -n "$OUT_DIR" ]] || OUT_DIR="../build-staging"
+  [[ -n "$CONFIG_TARGET" ]] || CONFIG_TARGET="allmodconfig"
+  STAGING_W1_LOG="../W1-staging.log"
+fi
 
 # --- Sanity checks ---
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -97,7 +116,7 @@ START_TIME=$(date +%s)
 echo "===== Kernel Build Started: $(date) ====="
 echo "Dir=${KERNEL_SRC_DIR}  Ref=${BRANCH_OR_TAG}  -j${MAKE_JOBS}"
 echo "Install=${DO_INSTALL}  UpdateGRUB=${UPDATE_GRUB}  localmodconfig=${USE_LOCALMODCONFIG}"
-echo "StagingDir=${STAGING_DIR}  W=${WARN_LEVEL:-""}  M=${PARTIAL_M:-""}  O=${OUT_DIR:-""}"
+echo "StagingDir=${STAGING_DIR}  W=${WARN_LEVEL:-""}  M=${PARTIAL_M:-""}  O=${OUT_DIR:-""}  C=${CONFIG_TARGET:-auto}  S=${STAGING_W1_MODE}"
 
 # --- Step 1: Dependencies (Fedora only) ---
 msg "Checking/Installing build dependencies (Fedora only)"
@@ -131,24 +150,43 @@ if [[ -n "$WARN_LEVEL" ]]; then
   MAKE_VARS_COMMON+=("W=$WARN_LEVEL")
 fi
 
-if [[ -f "/boot/config-$(uname -r)" ]]; then
-  echo "Copying running kernel config"
-  if [[ -n "$OUT_DIR" ]]; then
-    cp "/boot/config-$(uname -r)" "$OUT_DIR/.config"
+# Decide configuration path
+if [[ -n "$CONFIG_TARGET" ]]; then
+  case "$CONFIG_TARGET" in
+    allmodconfig)
+      echo "Using allmodconfig"
+      make "${MAKE_VARS_COMMON[@]}" allmodconfig ;;
+    defconfig)
+      echo "Using defconfig"
+      make "${MAKE_VARS_COMMON[@]}" defconfig ;;
+    olddefconfig)
+      echo "Using olddefconfig"
+      make "${MAKE_VARS_COMMON[@]}" olddefconfig ;;
+    localmodconfig)
+      echo "Using localmodconfig"
+      yes "" | make "${MAKE_VARS_COMMON[@]}" localmodconfig ;;
+    *) die "Unknown -C TARGET: $CONFIG_TARGET" ;;
+  esac
+else
+  if [[ -f "/boot/config-$(uname -r)" ]]; then
+    echo "Copying running kernel config"
+    if [[ -n "$OUT_DIR" ]]; then
+      cp "/boot/config-$(uname -r)" "$OUT_DIR/.config"
+    else
+      cp "/boot/config-$(uname -r)" .config
+    fi
   else
-    cp "/boot/config-$(uname -r)" .config
+    echo "No running config found; using defconfig"
+    make "${MAKE_VARS_COMMON[@]}" defconfig
   fi
-else
-  echo "No running config found; using defconfig"
-  make "${MAKE_VARS_COMMON[@]}" defconfig
-fi
 
-if (( USE_LOCALMODCONFIG )); then
-  echo "Optimizing with localmodconfig"
-  yes "" | make "${MAKE_VARS_COMMON[@]}" localmodconfig
-else
-  echo "Updating .config with olddefconfig"
-  make "${MAKE_VARS_COMMON[@]}" olddefconfig
+  if (( USE_LOCALMODCONFIG )); then
+    echo "Optimizing with localmodconfig"
+    yes "" | make "${MAKE_VARS_COMMON[@]}" localmodconfig
+  else
+    echo "Updating .config with olddefconfig"
+    make "${MAKE_VARS_COMMON[@]}" olddefconfig
+  fi
 fi
 
 # --- Step 4: Build (non-root, signs modules here if enabled) ---
@@ -161,8 +199,19 @@ if [[ -n "$PARTIAL_M" ]]; then
   MAKE_VARS_BUILD+=("M=$PARTIAL_M")
 fi
 
+# Prepare generated headers if doing a partial modules build
 if [[ -n "$PARTIAL_M" ]]; then
-  make -j"${MAKE_JOBS}" "${MAKE_VARS_BUILD[@]}" modules
+  msg "Preparing generated headers (modules_prepare)"
+  make "${MAKE_VARS_COMMON[@]}" modules_prepare
+fi
+
+if [[ -n "$PARTIAL_M" ]]; then
+  if (( STAGING_W1_MODE )); then
+    msg "Building modules (W=1) and logging to $STAGING_W1_LOG"
+    make -j"${MAKE_JOBS}" "${MAKE_VARS_BUILD[@]}" modules 2>&1 | tee "$STAGING_W1_LOG"
+  else
+    make -j"${MAKE_JOBS}" "${MAKE_VARS_BUILD[@]}" modules
+  fi
 else
   make -j"${MAKE_JOBS}" "${MAKE_VARS_BUILD[@]}"
 fi
