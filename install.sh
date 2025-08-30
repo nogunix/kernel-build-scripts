@@ -10,6 +10,11 @@ UPDATE_GRUB=0                # Usually not needed for Fedora+BLS. Use -g if requ
 USE_LOCALMODCONFIG=0         # Enable with -L
 LOGFILE="build_$(date +%Y%m%d_%H%M%S).log"
 
+# Extra make variables
+WARN_LEVEL=""               # -W <level> -> make W=<level>
+PARTIAL_M=""                # -M <path>  -> make M=<path>
+OUT_DIR=""                  # -O <dir>   -> make O=<dir>
+
 SUDO_KEEPALIVE_PID=""        # PID of the sudo keep-alive process
 
 # Destination for staging modules as non-root
@@ -18,13 +23,16 @@ STAGING_DIR="${STAGING_DIR:-$PWD/_staging}"  # Relative paths are OK. Can be ove
 # --- Helpers ---
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L]
+Usage: $(basename "$0") [-j N] [-d DIR] [-b BRANCH|TAG] [-n] [-g] [-L] [-W N] [-M PATH] [-O DIR]
   -j N   : make -jN (default: $(nproc) or $MAKE_JOBS)
   -d DIR : Kernel source directory (default: linux)
   -b REF : Branch/tag to checkout (default: master)
   -n     : Do not install (build only)
   -g     : Update GRUB configuration (usually not needed for Fedora)
   -L     : Use make localmodconfig (optimizes for running modules)
+  -W N   : Warning level for kernel build (passes make W=N)
+  -M PATH: Partial build target path (in-tree), passes make M=PATH and builds modules only
+  -O DIR : Out-of-tree build directory (passes make O=DIR). Used for all make invocations
 Environment variables:
   STAGING_DIR : INSTALL_MOD_PATH for modules_install (default: $PWD/_staging)
 EOF
@@ -50,7 +58,7 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Parse options ---
-while getopts ":j:d:b:ngLh" opt; do
+while getopts ":j:d:b:ngLW:M:O:h" opt; do
   case "$opt" in
     j) MAKE_JOBS="$OPTARG" ;;
     d) KERNEL_SRC_DIR="$OPTARG" ;;
@@ -58,6 +66,9 @@ while getopts ":j:d:b:ngLh" opt; do
     n) DO_INSTALL=0 ;;
     g) UPDATE_GRUB=1 ;;
     L) USE_LOCALMODCONFIG=1 ;;
+    W) WARN_LEVEL="$OPTARG" ;;
+    M) PARTIAL_M="$OPTARG" ;;
+    O) OUT_DIR="$OPTARG" ;;
     h) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
@@ -86,7 +97,7 @@ START_TIME=$(date +%s)
 echo "===== Kernel Build Started: $(date) ====="
 echo "Dir=${KERNEL_SRC_DIR}  Ref=${BRANCH_OR_TAG}  -j${MAKE_JOBS}"
 echo "Install=${DO_INSTALL}  UpdateGRUB=${UPDATE_GRUB}  localmodconfig=${USE_LOCALMODCONFIG}"
-echo "StagingDir=${STAGING_DIR}"
+echo "StagingDir=${STAGING_DIR}  W=${WARN_LEVEL:-""}  M=${PARTIAL_M:-""}  O=${OUT_DIR:-""}"
 
 # --- Step 1: Dependencies (Fedora only) ---
 msg "Checking/Installing build dependencies (Fedora only)"
@@ -110,27 +121,51 @@ fi
 
 # --- Step 3: Configure ---
 msg "Configuring the kernel"
+# Prepare common make variables
+MAKE_VARS_COMMON=()
+if [[ -n "$OUT_DIR" ]]; then
+  mkdir -p "$OUT_DIR"
+  MAKE_VARS_COMMON+=("O=$OUT_DIR")
+fi
+if [[ -n "$WARN_LEVEL" ]]; then
+  MAKE_VARS_COMMON+=("W=$WARN_LEVEL")
+fi
+
 if [[ -f "/boot/config-$(uname -r)" ]]; then
   echo "Copying running kernel config"
-  cp "/boot/config-$(uname -r)" .config
+  if [[ -n "$OUT_DIR" ]]; then
+    cp "/boot/config-$(uname -r)" "$OUT_DIR/.config"
+  else
+    cp "/boot/config-$(uname -r)" .config
+  fi
 else
   echo "No running config found; using defconfig"
-  make defconfig
+  make ${MAKE_VARS_COMMON[@]} defconfig
 fi
 
 if (( USE_LOCALMODCONFIG )); then
   echo "Optimizing with localmodconfig"
-  yes "" | make localmodconfig
+  yes "" | make ${MAKE_VARS_COMMON[@]} localmodconfig
 else
   echo "Updating .config with olddefconfig"
-  make olddefconfig
+  make ${MAKE_VARS_COMMON[@]} olddefconfig
 fi
 
 # --- Step 4: Build (non-root, signs modules here if enabled) ---
 msg "Building the kernel (this may take a while)"
 export CC="ccache gcc"
 export CXX="ccache g++"
-make -j"${MAKE_JOBS}"
+# Build vars (include M only for the build step)
+MAKE_VARS_BUILD=("${MAKE_VARS_COMMON[@]}")
+if [[ -n "$PARTIAL_M" ]]; then
+  MAKE_VARS_BUILD+=("M=$PARTIAL_M")
+fi
+
+if [[ -n "$PARTIAL_M" ]]; then
+  make -j"${MAKE_JOBS}" ${MAKE_VARS_BUILD[@]} modules
+else
+  make -j"${MAKE_JOBS}" ${MAKE_VARS_BUILD[@]}
+fi
 
 # --- Step 5: Install (Stage as non-root -> Sync as root) ---
 if (( DO_INSTALL )); then
@@ -138,7 +173,7 @@ if (( DO_INSTALL )); then
   # Example: Placed under ${SRC}/_staging/lib/modules/<version>
   rm -rf -- "${STAGING_DIR}"
   mkdir -p "${STAGING_DIR}"
-  make modules_install INSTALL_MOD_PATH="${STAGING_DIR}"
+  make ${MAKE_VARS_COMMON[@]} modules_install INSTALL_MOD_PATH="${STAGING_DIR}"
 
   # Identify the target version for installation (obtained from staging)
   STAGED_VERSION="$(
@@ -156,7 +191,7 @@ if (( DO_INSTALL )); then
 
   msg "Installing kernel image & BLS entries (root)"
   # Fedora uses kernel-install. Root is fine here.
-  sudo make install
+  sudo make ${MAKE_VARS_COMMON[@]} install
 
   # Record directory
   RECORD_DIR="/var/lib/kernel-build-scripts"
